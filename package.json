@@ -1,0 +1,32 @@
+{
+  "name": "playwright-codegen",
+  "version": "1.0.0",
+  "description": "A spin off of playwright's codegen",
+  "main": "index.js",
+  "scripts": {
+    "serve": "python3 -m http.server -d tests",
+    "test": "playwright test --headed"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ShaMan123/erase2d.git"
+  },
+  "keywords": [
+    "playwright",
+    "codegen"
+  ],
+  "author": "ShaMan123",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ShaMan123/erase2d/issues"
+  },
+  "homepage": "https://github.com/ShaMan123/erase2d#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.43.1",
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^20.12.7"
+  },
+  "dependencies": {
+    "fs-extra": "^11.2.0"
+  }
+}
