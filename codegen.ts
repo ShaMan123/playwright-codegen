@@ -18,27 +18,23 @@ const EVENT_MODIFIER_KEYS = [
   "altKey",
   "metaKey",
 ] as const;
+type EventModifiers = Record<(typeof EVENT_MODIFIER_KEYS)[number], boolean>;
 
 const EVENT_KEYS = ["type", "x", "y", "key"] as const;
 
 const EVENTS = ["mousedown", "mousemove", "mouseup", "dblclick"] as const;
 type EventType = (typeof EVENTS)[number];
 
-type EventModifiers = Pick<
-  MouseEvent,
-  "shiftKey" | "ctrlKey" | "altKey" | "metaKey"
->;
-
 type MouseEventData = {
   type: EventType;
   x: number;
   y: number;
-  handle: ElementHandle | null;
+  handle: string;
 } & Partial<EventModifiers>;
 // type KeyboardEventData = { key: string } & Partial<EventModifiers>;
 type ScreenshotEventData = {
   type: "screenshot";
-  handle: ElementHandle | null;
+  handle: string;
   screenshot: Buffer;
   name?: string;
   options?: PageScreenshotOptions;
@@ -130,52 +126,50 @@ export class Codegen extends EventEmitter {
       execSync(`code ${this.file}`);
     } catch (error) {}
 
-    await page.exposeBinding(
-      "consumeEvent",
-      async ({}, e: JSHandle<MouseEvent>) => {
-        const extract = async (key: string) => [
-          key,
-          await (await e.getProperty(key)).jsonValue(),
-        ];
-        const modifiers = Object.fromEntries(
-          (await Promise.all(EVENT_MODIFIER_KEYS.map(extract))).filter(
-            ([k, v]) => !!v
-          )
-        );
-        const data = Object.fromEntries(
-          (await Promise.all(EVENT_KEYS.map(extract))).filter(
-            ([k, v]) => typeof v !== "undefined"
-          )
-        );
-        this.emit(data.type, {
-          ...data,
-          ...modifiers,
-          handle: await (await e.getProperty("target")).asElement(),
-        });
-        await e.dispose();
-      },
-      { handle: true }
+    await page.exposeFunction(
+      "resolveSelector",
+      (handle: ElementHandle<Node>) => this.toSelector(handle)
     );
+
+    await page.exposeFunction("consumeEvent", async (e: MouseEventData) => {
+      this.emit(e.type, {
+        ...e,
+      } as MouseEventData);
+    });
+
+    await page.exposeBinding("startRecording", async ({ page }) => {
+      this.recording = true;
+      const disposer = await page.evaluateHandle(
+        ([events, modifiers]) => {
+          const consume = async (e: MouseEvent) =>
+            consumeEvent({
+              type: e.type,
+              x: e.x,
+              y: e.y,
+              ...Object.fromEntries(
+                modifiers.map((k) => [k, e[k]]).filter(([k, v]) => !!v)
+              ),
+              handle: await resolveSelector(e.target),
+            });
+          events.forEach((ev) => window.addEventListener(ev, consume));
+          return () =>
+            events.forEach((ev) => window.removeEventListener(ev, consume));
+        },
+        [EVENTS, EVENT_MODIFIER_KEYS] as const
+      );
+    });
+
+    await page.exposeFunction("stopRecording", async () => {
+      this.recording = false;
+      // await disposer.evaluate((d) => d());
+      // await disposer.dispose();
+    });
 
     const assertRecording = () => {
       if (!this.recording) {
         throw new Error("Recoding is not in progress, call `startRecording()`");
       }
     };
-
-    await page.exposeBinding("startRecording", async ({ page }) => {
-      this.recording = true;
-      await page.evaluateHandle((events) => {
-        events.forEach((ev) => window.addEventListener(ev, consumeEvent));
-      }, EVENTS);
-    });
-
-    await page.exposeBinding("stopRecording", async ({ page }) => {
-      await page.evaluateHandle((events) => {
-        EVENTS.forEach((ev) => window.removeEventListener(ev, consumeEvent));
-      }, EVENTS);
-      this.recording = false;
-    });
 
     await page.exposeFunction("step", async (name?: string) => {
       assertRecording();
@@ -202,11 +196,12 @@ export class Codegen extends EventEmitter {
         delete options?.name;
         this.emit("screenshot", {
           type: "screenshot",
-          handle,
+          handle: this.toSelector(handle),
           screenshot: await (handle || page).screenshot(options),
           name,
           options,
         } as ScreenshotEventData);
+        await handle.dispose();
       }
     );
   }
@@ -254,22 +249,35 @@ export class Codegen extends EventEmitter {
         const { x, y, handle } = ev;
         if (data[index - 1]?.[0] === "mousedown") {
           return [
-            `await page.click(${this.toSelector(handle)}, ${JSON.stringify({
+            `await page.click(${handle}, ${JSON.stringify({
               position: { x, y },
             })});`,
           ];
         }
-        const down = data.findLast(
-          (ev) => ev.type === "mousedown"
-        ) as MouseEventData;
+        const downIndex = data.findLastIndex((ev) => ev.type === "mousedown");
+        const down = data[index] as MouseEventData;
+        const move = data
+          .slice(downIndex + 1, index)
+          .filter((ev) => ev.type === "mousemove") as MouseEventData[];
         return [
-          `await page.hover(${this.toSelector(down.handle)}, ${JSON.stringify({
+          `await page.hover(${down.handle}, ${JSON.stringify({
             position: { x: down.x, y: down.y },
           })});`,
           `await page.mouse.down();`,
-          `await page.mouse.move(${x}, ${y}, { steps: ${
-            index - data.indexOf(down)
-          } });`,
+          ...move
+            .reduce(
+              (ev, curr) => {
+                const last = ev[ev.length - 1];
+                return EVENT_MODIFIER_KEYS.every((k) => curr[k] === last[k])
+                  ? ev.slice(0, -1).concat({ ...curr, steps: last.steps + 1 })
+                  : ev.concat({ ...curr, steps: 0 });
+              },
+              [{ ...move[0], steps: 0 }]
+            )
+            .map(
+              ({ x, y, steps }) =>
+                `await page.mouse.move(${x}, ${y}, { steps: ${steps} });`
+            ),
           `await page.mouse.up();`,
         ];
       }
@@ -282,7 +290,7 @@ export class Codegen extends EventEmitter {
       case "screenshot": {
         const { name, options, handle } = ev;
         return [
-          `expect(await page.locator(${this.toSelector(handle)}).screenshot(${
+          `expect(await page.locator(${handle}).screenshot(${
             options ? JSON.stringify(options) : ""
           })).toMatchSnapshot(${name ? JSON.stringify({ name }) : ""});`,
         ];
