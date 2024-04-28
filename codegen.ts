@@ -22,20 +22,25 @@ const EVENT_MODIFIER_KEYS = [
 ] as const;
 type EventModifiers = Record<(typeof EVENT_MODIFIER_KEYS)[number], boolean>;
 
-const MOUSE_EVENTS = ["mousedown", "mousemove", "mouseup", "dblclick"] as const;
-type MouseEventType = (typeof MOUSE_EVENTS)[number];
+const MOUSE_EVENTS = [
+  "mousedown",
+  "mousemove",
+  "mouseup",
+  "dblclick",
+  "wheel",
+] as const;
 type BasicMouseEventData = {
   x: number;
   y: number;
   handle: string;
 } & Partial<EventModifiers>;
-type MouseEventData = {
-  type: MouseEventType;
-} & BasicMouseEventData;
-type MouseMoveEventData = BasicMouseEventData & {
-  type: "mousemove";
-  steps?: number;
-};
+type MouseEventData = (
+  | {
+      type: "mousedown" | "mousemove" | "mouseup" | "dblclick";
+    }
+  | { type: "wheel"; deltaX: number; deltaY: number }
+) &
+  BasicMouseEventData;
 type ConsumedMouseEventData = (
   | {
       type: "mousedown" | "mouseup" | "dblclick";
@@ -45,19 +50,19 @@ type ConsumedMouseEventData = (
       steps?: number;
     }
   | { type: "click" }
+  | { type: "wheel"; deltaX: number; deltaY: number }
 ) &
   BasicMouseEventData;
 
 const KEYBOARD_EVENTS = ["keydown", "keyup"] as const;
-type KeyboardEventType = (typeof KEYBOARD_EVENTS)[number];
 type BasicKeyboardEventData = {
   key: string;
 } & Partial<EventModifiers>;
 type KeyboardEventData = BasicKeyboardEventData & {
-  type: KeyboardEventType;
+  type: "keydown" | "keyup";
 };
 type ConsumedKeyboardEventData = BasicKeyboardEventData & {
-  type: KeyboardEventType | "keypress";
+  type: "keydown" | "keyup" | "keypress";
 };
 
 type ScreenshotEventData = {
@@ -75,8 +80,8 @@ type CommentEventData = { type: "comment"; value: string };
 type NavigationEventData = { type: "navigation"; url: string };
 
 type EventMap = {
-  [K in MouseEventType]: MouseEventData;
-} & { [K in KeyboardEventType]: KeyboardEventData } & {
+  [K in MouseEventData["type"]]: MouseEventData;
+} & { [K in KeyboardEventData["type"]]: KeyboardEventData } & {
   screenshot: ScreenshotEventData;
   step: StepEventData;
   comment: CommentEventData;
@@ -169,7 +174,7 @@ export class Codegen extends EventEmitter {
   }
 
   /**
-   * https://github.com/microsoft/playwright/blob/1f63cbff08a11f6fad671824adfd4a0f283da29a/packages/playwright-core/src/server/injected/selectorGenerator.ts#L73
+   * @todo https://github.com/microsoft/playwright/blob/1f63cbff08a11f6fad671824adfd4a0f283da29a/packages/playwright-core/src/server/injected/selectorGenerator.ts#L73
    */
   toSelector(handle: ElementHandle<Node>) {
     return "selector";
@@ -263,11 +268,14 @@ export class Codegen extends EventEmitter {
   protected async installWindowEventHandlers(page: Page) {
     const disposer = await page.evaluateHandle(
       ([mouseEvents, keyboardEvents, modifiers]) => {
-        const consumeMouseEvent = async (e: MouseEvent) =>
+        const consumeMouseEvent = async (e: MouseEvent | WheelEvent) =>
           window.emitCodegenEvent({
             type: e.type,
             x: e.x,
             y: e.y,
+            ...(e instanceof WheelEvent
+              ? { deltaX: e.deltaX, deltaY: e.deltaY, deltaZ: e.deltaZ }
+              : {}),
             ...Object.fromEntries(
               modifiers.map((k) => [k, e[k]]).filter(([k, v]) => !!v)
             ),
@@ -353,7 +361,7 @@ export class Codegen extends EventEmitter {
     }
 
     if (ev.type === "mousemove" && last === "mousemove") {
-      const { steps = 0 } = this.events.pop() as MouseMoveEventData;
+      const { steps = 0 } = this.events.pop() as { steps?: number };
       this.events.push({ ...ev, type: "mousemove", steps: steps + 1 });
     } else if (ev.type === "mouseup" && last === "mousedown") {
       this.events.pop();
@@ -369,6 +377,22 @@ export class Codegen extends EventEmitter {
       this.events.pop();
       this.events.pop();
       this.events.push(ev);
+    } else if (ev.type === "wheel" && last === "wheel") {
+      const { x, y, deltaX, deltaY } = this.events[
+        this.events.length - 1
+      ] as ConsumedMouseEventData & {
+        type: "wheel";
+      };
+      if (x === ev.x && y === ev.y) {
+        this.events.pop();
+        this.events.push({
+          ...ev,
+          deltaX: deltaX + ev.deltaX,
+          deltaY: deltaY + ev.deltaY,
+        });
+      } else {
+        this.events.push(ev);
+      }
     } else {
       this.events.push(ev);
     }
@@ -424,6 +448,14 @@ export class Codegen extends EventEmitter {
         case "dblclick": {
           const { x, y } = ev;
           return [`await page.mouse.dblclick(${x}, ${y});`];
+        }
+
+        case "wheel": {
+          const { x, y, deltaX, deltaY } = ev;
+          return [
+            `await page.mouse.move(${x}, ${y});`,
+            `await page.mouse.wheel(${deltaX}, ${deltaY});`,
+          ];
         }
 
         case "screenshot": {
