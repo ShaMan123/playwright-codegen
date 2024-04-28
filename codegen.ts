@@ -69,23 +69,28 @@ type ScreenshotEventData = {
 
 type StepEventData = { type: "step"; which: "start" | "end"; name?: string };
 
+type CommentEventData = { type: "comment"; value: string };
+
 type EventMap = {
   [K in MouseEventType]: MouseEventData;
 } & { [K in KeyboardEventType]: KeyboardEventData } & {
   screenshot: ScreenshotEventData;
   step: StepEventData;
+  comment: CommentEventData;
 };
 type ConsumedEventData =
   | ConsumedMouseEventData
   | ConsumedKeyboardEventData
   | ScreenshotEventData
-  | StepEventData;
+  | StepEventData
+  | CommentEventData;
 
 const EVENTS_TO_CONSUME = [
   ...MOUSE_EVENTS,
   ...KEYBOARD_EVENTS,
-  "step",
   "screenshot",
+  "step",
+  "comment",
 ] as const;
 
 const getCodegenKey = ({
@@ -111,6 +116,8 @@ declare global {
     captureScreenshot: (
       options?: PageScreenshotOptions & { name?: string }
     ) => Promise<void>;
+    comment: (value: string) => Promise<void>;
+
     emitCodegenEvent: (e: MouseEventData | KeyboardEventData) => Promise<void>;
     resolveSelector: (eventTarget: EventTarget) => Promise<string>;
   }
@@ -122,8 +129,12 @@ export class Codegen extends EventEmitter {
   protected events: ConsumedEventData[] = [];
   private recording = false;
   private down = false;
+  private steps: string[] = [];
   private counter = 0;
 
+  /**
+   * adds codegen methods to the window and starts recording, see {@link Window}
+   */
   static async start(page: Page, testInfo: TestInfo) {
     const codegen = new Codegen(testInfo);
     try {
@@ -232,11 +243,19 @@ export class Codegen extends EventEmitter {
         which: "start",
         name,
       } as StepEventData);
+      await page.evaluate(
+        (value) => console.log(value),
+        this.steps.join(" > ")
+      );
     });
 
     await page.exposeFunction("endStep", async () => {
       assertRecording();
       this.emit("step", { type: "step", which: "end" } as StepEventData);
+      await page.evaluate(
+        (value) => console.log(value),
+        this.steps.join(" > ")
+      );
     });
 
     await page.exposeBinding(
@@ -258,6 +277,11 @@ export class Codegen extends EventEmitter {
         await handle.dispose();
       }
     );
+
+    await page.exposeFunction("comment", async (value: string) => {
+      assertRecording();
+      this.emit("comment", { type: "comment", value } as CommentEventData);
+    });
   }
 
   protected attach() {
@@ -297,6 +321,12 @@ export class Codegen extends EventEmitter {
       return false;
     }
 
+    if (ev.type === "step" && ev.which === "start") {
+      this.steps.push(ev.name || "step");
+    } else if (ev.type === "step" && ev.which === "end" && !this.steps.pop()) {
+      return false;
+    }
+
     if (ev.type === "mousemove" && last === "mousemove") {
       const { steps = 0 } = this.events.pop() as MouseMoveEventData;
       this.events.push({ ...ev, type: "mousemove", steps: steps + 1 });
@@ -314,13 +344,10 @@ export class Codegen extends EventEmitter {
   }
 
   parse() {
-    const data = this.events.slice();
-
-    // close last step
-    const lastStep = data.findLast((ev) => ev.type === "step") as
-      | StepEventData
-      | undefined;
-    lastStep?.which === "start" && data.push({ type: "step", which: "end" });
+    const data = this.events.concat(
+      // close open steps
+      new Array(this.steps.length).fill({ type: "step", which: "end" })
+    );
 
     return data.flatMap((ev) => {
       switch (ev.type) {
@@ -387,6 +414,10 @@ export class Codegen extends EventEmitter {
           }
         }
 
+        case "comment": {
+          return [`// ${ev.value}`];
+        }
+
         default:
           return [];
       }
@@ -399,6 +430,7 @@ export class Codegen extends EventEmitter {
       [
         `import { test, expect } from "@playwright/test";`,
         "",
+        "// This file is readonly and gets written frequently",
         "",
         "test('codegen output', async ({ page }, testInfo) => {",
         "",
