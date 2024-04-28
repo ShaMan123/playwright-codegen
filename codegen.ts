@@ -1,10 +1,8 @@
-import {
+import type {
   ElementHandle,
-  Frame,
   Page,
   PageScreenshotOptions,
   TestInfo,
-  expect,
 } from "@playwright/test";
 import { EventEmitter } from "events";
 import { readFileSync, writeFileSync } from "fs";
@@ -320,19 +318,20 @@ export class Codegen extends EventEmitter {
     const write = debounce(() => this.write(), 250);
     const exec = (ev: EventMap[keyof EventMap]) => this.consume(ev) && write();
     EVENTS_TO_CONSUME.forEach((eventType) => this.on(eventType, exec));
-    this.on("screenshot", (ev) => this.attachScreenshot(ev));
-  }
-
-  protected attachScreenshot({ name, screenshot }: ScreenshotEventData) {
-    this.testInfo.attach(name || `codegen${this.counter++}.png`, {
-      body: screenshot,
-    });
-    const { updateSnapshots } = this.testInfo.config;
-    this.testInfo.config.updateSnapshots = "all";
-    expect(screenshot).toMatchSnapshot({
-      name,
-    });
-    this.testInfo.config.updateSnapshots = updateSnapshots;
+    this.on(
+      "screenshot",
+      ({
+        name = `${this.testInfo.title}-${++this.counter}.png`,
+        screenshot,
+      }) => {
+        this.testInfo.attach(name, {
+          body: screenshot,
+        });
+        const snapshotPath = this.testInfo.snapshotPath(name);
+        ensureFileSync(snapshotPath);
+        writeFileSync(snapshotPath, screenshot);
+      }
+    );
   }
 
   on<K extends keyof EventMap>(
