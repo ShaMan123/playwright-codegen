@@ -1,0 +1,31 @@
+name: "🧪"
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  codegen:
+    name: Codegen tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "npm"
+      - run: npm ci
+
+        # Playwright suggests against caching the browser install
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps chromium
+      - name: Run Codegen Tests
+        run: xvfb-run npm test
+
+      - name: Upload Test Output
+        uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: test-report
+          path: ./test-report/
