@@ -102,6 +102,20 @@ const getCodegenKey = ({
     .join("+");
 };
 
+declare global {
+  interface Window {
+    startRecording: () => Promise<void>;
+    stopRecording: () => Promise<void>;
+    step: (name?: string) => Promise<void>;
+    endStep: () => Promise<void>;
+    captureScreenshot: (
+      options?: PageScreenshotOptions & { name?: string }
+    ) => Promise<void>;
+    emitCodegenEvent: (e: MouseEventData | KeyboardEventData) => Promise<void>;
+    resolveSelector: (eventTarget: EventTarget) => Promise<string>;
+  }
+}
+
 export class Codegen extends EventEmitter {
   readonly testInfo: TestInfo;
   private readonly file: string;
@@ -116,9 +130,8 @@ export class Codegen extends EventEmitter {
       execSync(`code ${codegen.file}`);
     } catch (error) {}
     await codegen.install(page);
-    await page.evaluate(() => startRecording());
+    await page.evaluate(() => window.startRecording());
     await page.pause();
-    return codegen;
   }
 
   constructor(testInfo: TestInfo) {
@@ -158,23 +171,23 @@ export class Codegen extends EventEmitter {
     const disposer = await page.evaluateHandle(
       ([mouseEvents, keyboardEvents, modifiers]) => {
         const consumeMouseEvent = async (e: MouseEvent) =>
-          emitCodegenEvent({
+          window.emitCodegenEvent({
             type: e.type,
             x: e.x,
             y: e.y,
             ...Object.fromEntries(
               modifiers.map((k) => [k, e[k]]).filter(([k, v]) => !!v)
             ),
-            handle: await resolveSelector(e.target),
+            handle: await window.resolveSelector(e.target),
           });
         const consumeKeyboardEvent = async (e: KeyboardEvent) =>
-          emitCodegenEvent({
+          window.emitCodegenEvent({
             type: e.type,
             key: e.key,
             ...Object.fromEntries(
               modifiers.map((k) => [k, e[k]]).filter(([k, v]) => !!v)
             ),
-            handle: await resolveSelector(e.target),
+            handle: await window.resolveSelector(e.target),
           });
 
         mouseEvents.forEach((ev) =>
