@@ -71,19 +71,23 @@ type StepEventData = { type: "step"; which: "start" | "end"; name?: string };
 
 type CommentEventData = { type: "comment"; value: string };
 
+type NavigationEventData = { type: "navigation"; url: string };
+
 type EventMap = {
   [K in MouseEventType]: MouseEventData;
 } & { [K in KeyboardEventType]: KeyboardEventData } & {
   screenshot: ScreenshotEventData;
   step: StepEventData;
   comment: CommentEventData;
+  navigation: NavigationEventData;
 };
 type ConsumedEventData =
   | ConsumedMouseEventData
   | ConsumedKeyboardEventData
   | ScreenshotEventData
   | StepEventData
-  | CommentEventData;
+  | CommentEventData
+  | NavigationEventData;
 
 const EVENTS_TO_CONSUME = [
   ...MOUSE_EVENTS,
@@ -91,6 +95,7 @@ const EVENTS_TO_CONSUME = [
   "screenshot",
   "step",
   "comment",
+  "navigation",
 ] as const;
 
 const getCodegenKey = ({
@@ -141,19 +146,19 @@ export class Codegen extends EventEmitter {
       execSync(`code ${codegen.file}`);
     } catch (error) {}
     await codegen.install(page);
-    await page.evaluate(() => window.startRecording());
+    codegen.recording = true;
     await page.pause();
   }
 
-  constructor(testInfo: TestInfo) {
+  constructor(testInfo: TestInfo, fileName = "codegen.ts") {
     super();
     this.testInfo = testInfo;
-    this.file = this.prepareFile(testInfo);
+    this.file = this.prepareFile(testInfo, fileName);
     this.attach();
   }
 
-  protected prepareFile(testInfo: TestInfo) {
-    const file = path.resolve(testInfo.outputDir, "codegen.ts");
+  protected prepareFile(testInfo: TestInfo, fileName: string) {
+    const file = path.resolve(testInfo.outputDir, fileName);
     ensureFileSync(file);
     testInfo.attach("codegen.ts", {
       path: file,
@@ -179,48 +184,15 @@ export class Codegen extends EventEmitter {
       }
     );
 
-    const disposer = await page.evaluateHandle(
-      ([mouseEvents, keyboardEvents, modifiers]) => {
-        const consumeMouseEvent = async (e: MouseEvent) =>
-          window.emitCodegenEvent({
-            type: e.type,
-            x: e.x,
-            y: e.y,
-            ...Object.fromEntries(
-              modifiers.map((k) => [k, e[k]]).filter(([k, v]) => !!v)
-            ),
-            handle: await window.resolveSelector(e.target),
-          });
-        const consumeKeyboardEvent = async (e: KeyboardEvent) =>
-          window.emitCodegenEvent({
-            type: e.type,
-            key: e.key,
-            ...Object.fromEntries(
-              modifiers.map((k) => [k, e[k]]).filter(([k, v]) => !!v)
-            ),
-            handle: await window.resolveSelector(e.target),
-          });
+    page.on("framenavigated", async (frame) => {
+      this.emit("navigation", {
+        type: "navigation",
+        url: frame.url(),
+      } as NavigationEventData);
+    });
 
-        mouseEvents.forEach((ev) =>
-          window.addEventListener(ev, consumeMouseEvent)
-        );
-        keyboardEvents.forEach((ev) =>
-          window.addEventListener(ev, consumeKeyboardEvent)
-        );
-
-        return () => {
-          mouseEvents.forEach((ev) =>
-            window.removeEventListener(ev, consumeMouseEvent)
-          );
-          keyboardEvents.forEach((ev) =>
-            window.removeEventListener(ev, consumeKeyboardEvent)
-          );
-        };
-      },
-      [MOUSE_EVENTS, KEYBOARD_EVENTS, EVENT_MODIFIER_KEYS] as const
-    );
-    // await disposer.evaluate((d) => d());
-    // await disposer.dispose();
+    this.installWindowEventHandlers(page);
+    page.on("load", () => this.installWindowEventHandlers(page));
 
     await page.exposeFunction("startRecording", () => {
       this.recording = true;
@@ -282,6 +254,54 @@ export class Codegen extends EventEmitter {
       assertRecording();
       this.emit("comment", { type: "comment", value } as CommentEventData);
     });
+  }
+
+  protected async installWindowEventHandlers(page: Page) {
+    const disposer = await page.evaluateHandle(
+      ([mouseEvents, keyboardEvents, modifiers]) => {
+        const consumeMouseEvent = async (e: MouseEvent) =>
+          window.emitCodegenEvent({
+            type: e.type,
+            x: e.x,
+            y: e.y,
+            ...Object.fromEntries(
+              modifiers.map((k) => [k, e[k]]).filter(([k, v]) => !!v)
+            ),
+            handle: await window.resolveSelector(e.target),
+          });
+        const consumeKeyboardEvent = async (e: KeyboardEvent) =>
+          window.emitCodegenEvent({
+            type: e.type,
+            key: e.key,
+            ...Object.fromEntries(
+              modifiers.map((k) => [k, e[k]]).filter(([k, v]) => !!v)
+            ),
+            handle: await window.resolveSelector(e.target),
+          });
+
+        mouseEvents.forEach((ev) =>
+          window.addEventListener(ev, consumeMouseEvent)
+        );
+        keyboardEvents.forEach((ev) =>
+          window.addEventListener(ev, consumeKeyboardEvent)
+        );
+
+        return () => {
+          mouseEvents.forEach((ev) =>
+            window.removeEventListener(ev, consumeMouseEvent)
+          );
+          keyboardEvents.forEach((ev) =>
+            window.removeEventListener(ev, consumeKeyboardEvent)
+          );
+        };
+      },
+      [MOUSE_EVENTS, KEYBOARD_EVENTS, EVENT_MODIFIER_KEYS] as const
+    );
+
+    return async () => {
+      await disposer.evaluate((d) => d());
+      await disposer.dispose();
+    };
   }
 
   protected attach() {
@@ -416,6 +436,10 @@ export class Codegen extends EventEmitter {
 
         case "comment": {
           return [`// ${ev.value}`];
+        }
+
+        case "navigation": {
+          return [`await page.goto('${ev.url}');`];
         }
 
         default:
