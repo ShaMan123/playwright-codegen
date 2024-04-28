@@ -31,3 +31,18 @@ test("My codegen test", async ({ page }, testInfo) => {
   await Codegen.start(page, testInfo); // launches a TS file that is updated by codegen
 });
 ```
+
+Then in devtools you can use the following:
+
+```typescript
+interface CodegenMethods {
+  startRecording: () => Promise<void>;
+  stopRecording: () => Promise<void>;
+  step: (name?: string) => Promise<void>;
+  endStep: () => Promise<void>;
+  captureScreenshot: (
+    options?: PageScreenshotOptions & { name?: string }
+  ) => Promise<void>;
+  comment: (value: string) => Promise<void>;
+}
+```

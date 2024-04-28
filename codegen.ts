@@ -116,20 +116,24 @@ const getCodegenKey = ({
     .join("+");
 };
 
-declare global {
-  interface Window {
-    startRecording: () => Promise<void>;
-    stopRecording: () => Promise<void>;
-    step: (name?: string) => Promise<void>;
-    endStep: () => Promise<void>;
-    captureScreenshot: (
-      options?: PageScreenshotOptions & { name?: string }
-    ) => Promise<void>;
-    comment: (value: string) => Promise<void>;
+interface PrivateCodegenMethods {
+  emitCodegenEvent: (e: MouseEventData | KeyboardEventData) => Promise<void>;
+  resolveSelector: (eventTarget: EventTarget) => Promise<string>;
+}
 
-    emitCodegenEvent: (e: MouseEventData | KeyboardEventData) => Promise<void>;
-    resolveSelector: (eventTarget: EventTarget) => Promise<string>;
-  }
+interface CodegenMethods {
+  startRecording: () => Promise<void>;
+  stopRecording: () => Promise<void>;
+  step: (name?: string) => Promise<void>;
+  endStep: () => Promise<void>;
+  captureScreenshot: (
+    options?: PageScreenshotOptions & { name?: string }
+  ) => Promise<void>;
+  comment: (value: string) => Promise<void>;
+}
+
+declare global {
+  interface Window extends PrivateCodegenMethods, CodegenMethods {}
 }
 
 export class Codegen extends EventEmitter {
@@ -142,7 +146,7 @@ export class Codegen extends EventEmitter {
   private counter = 0;
 
   /**
-   * adds codegen methods to the window and starts recording, see {@link Window}
+   * adds {@link CodegenMethods} to the window and starts recording
    */
   static async start(page: Page, testInfo: TestInfo) {
     const codegen = new Codegen(testInfo);
@@ -178,6 +182,9 @@ export class Codegen extends EventEmitter {
     return "selector";
   }
 
+  /**
+   * adds {@link PrivateCodegenMethods}, {@link CodegenMethods} to the window and attaches event listeners
+   */
   async install(page: Page) {
     await page.exposeFunction(
       "resolveSelector",
