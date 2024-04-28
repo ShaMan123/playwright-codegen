@@ -24,9 +24,14 @@
   "devDependencies": {
     "@playwright/test": "^1.43.1",
     "@types/fs-extra": "^11.0.4",
+    "@types/lodash.capitalize": "^4.2.9",
+    "@types/lodash.debounce": "^4.0.9",
     "@types/node": "^20.12.7"
   },
   "dependencies": {
-    "fs-extra": "^11.2.0"
+    "fs-extra": "^11.2.0",
+    "lodash.capitalize": "^4.2.1",
+    "lodash.debounce": "^4.0.8",
+    "prettier": "^3.2.5"
   }
 }
