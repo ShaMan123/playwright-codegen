@@ -1,6 +1,13 @@
-<!-- 
-    This file overrides the `body` of the test app as defined in `e2e/site/index.html`.
-    Add it only if there is a need to change `body`
- -->
-
 <canvas id="canvas" width="800" height="600"></canvas>
+<script>
+  window.addEventListener("load", () => {
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    for (let i = 0; i < 500; i++) {
+      for (let j = 0; j < 500; j++) {
+        ctx.fillStyle = `hsl(${Math.round((i * j) % 360)}, 100%, 50%)`;
+        ctx.fillRect(i, j, i % 20, j % 20);
+      }
+    }
+  });
+</script>

@@ -1,15 +1,16 @@
 {
   "name": "playwright-codegen",
   "version": "1.0.0",
-  "description": "A spin off of playwright's codegen",
-  "main": "index.js",
+  "description": "A simple version of playwright's codegen",
+  "main": "codegen.ts",
   "scripts": {
     "serve": "python3 -m http.server -d tests",
-    "test": "playwright test --headed"
+    "start": "playwright test --headed tests/start.spec.ts",
+    "test": "playwright test --headed tests/codegen.spec.ts"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ShaMan123/erase2d.git"
+    "url": "git+https://github.com/ShaMan123/playwright-codegen.git"
   },
   "keywords": [
     "playwright",
@@ -18,15 +19,20 @@
   "author": "ShaMan123",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/ShaMan123/erase2d/issues"
+    "url": "https://github.com/ShaMan123/playwright-codegen/issues"
   },
-  "homepage": "https://github.com/ShaMan123/erase2d#readme",
+  "homepage": "https://github.com/ShaMan123/playwright-codegen#readme",
   "devDependencies": {
     "@playwright/test": "^1.43.1",
     "@types/fs-extra": "^11.0.4",
+    "@types/lodash.capitalize": "^4.2.9",
+    "@types/lodash.debounce": "^4.0.9",
     "@types/node": "^20.12.7"
   },
   "dependencies": {
-    "fs-extra": "^11.2.0"
+    "fs-extra": "^11.2.0",
+    "lodash.capitalize": "^4.2.1",
+    "lodash.debounce": "^4.0.8",
+    "prettier": "^3.2.5"
   }
 }

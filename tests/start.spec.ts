@@ -1,7 +1,7 @@
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { Codegen } from "../codegen";
 
 test("codegen", async ({ page }, testInfo) => {
-  page.goto("/");
+  await page.goto("/");
   await Codegen.start(page, testInfo);
 });
