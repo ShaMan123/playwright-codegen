@@ -366,7 +366,16 @@ export class Codegen extends EventEmitter {
     } else if (ev.type === "mouseup" && last === "mousedown") {
       this.events.pop();
       this.events.push({ ...ev, type: "click" });
-    } else if (ev.type === "keyup" && last === "keydown") {
+    } else if (
+      ev.type === "keyup" &&
+      last === "keydown" &&
+      getCodegenKey(ev) ===
+        getCodegenKey(
+          this.events[this.events.length - 1] as ConsumedMouseEventData & {
+            type: "keydown";
+          }
+        )
+    ) {
       this.events.pop();
       this.events.push({ ...ev, type: "keypress" });
     } else if (
