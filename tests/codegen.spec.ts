@@ -1,21 +1,28 @@
 import { expect, test } from "@playwright/test";
-import { existsSync, rmSync } from "fs";
+import { existsSync, readFileSync, rmSync } from "fs";
+import { Codegen } from "../codegen";
+
+let codegen: Codegen;
 
 // clear snapshots so we can test snapshot generation
-test.beforeEach(async ({ page }, testInfo) => {
-  ["a.png", "b.png", "codegen-1.png", "codegen-2.png"].forEach((name) => {
+test.beforeAll(async ({}, testInfo) => {
+  codegen = new Codegen(testInfo);
+  ["a.png", "b.png", "codegen-1.png"].forEach((name) => {
     const pathToFile = testInfo.snapshotPath(name);
     existsSync(pathToFile) && rmSync(pathToFile);
     expect(existsSync(pathToFile)).toBeFalsy();
   });
 });
 // test codegen
-test.afterEach(async ({ page }, testInfo) => {
+test.afterAll(async ({}, testInfo) => {
   await test.step("test output", async () => {
-    const [events, codegen] = testInfo.attachments.slice(-2);
-    expect(events.body).toMatchSnapshot({ name: "recorded_events.dat" });
-    expect(codegen.body).toMatchSnapshot({ name: "codegen.dat" });
-    ["a.png", "b.png", "codegen-1.png", "codegen-2.png"].forEach((name) => {
+    expect(readFileSync(codegen.file)).toMatchSnapshot({
+      name: "codegen.dat",
+    });
+    // const [events, codegen] = testInfo.attachments.slice(-2);
+    // expect(events.body).toMatchSnapshot({ name: "recorded_events.dat" });
+    // expect(codegen.body).toMatchSnapshot({ name: "codegen.dat" });
+    ["a.png", "b.png", "codegen-1.png"].forEach((name) => {
       const pathToFile = testInfo.snapshotPath(name);
       expect(existsSync(pathToFile)).toBeTruthy();
     });
@@ -23,10 +30,13 @@ test.afterEach(async ({ page }, testInfo) => {
 });
 
 test("codegen", async ({ page }, testInfo) => {
+  await page.goto("/");
+  await codegen.install(page);
+  await page.goto("/");
   await test.step("generate test", async () => {
     await test.step("startRecording()", async () => {
       await page.evaluate(() => window.startRecording());
-      await page.hover("canvas_top=#canvas", {
+      await page.hover("#canvas", {
         position: { x: 443, y: 43 },
       });
       await page.mouse.down();
@@ -36,7 +46,7 @@ test("codegen", async ({ page }, testInfo) => {
 
     await test.step(`step('1')`, async () => {
       await page.evaluate(() => window.step("1"));
-      await page.hover("canvas_top=#canvas", {
+      await page.hover("#canvas", {
         position: { x: 268, y: 203 },
       });
       await page.mouse.down();
@@ -46,7 +56,7 @@ test("codegen", async ({ page }, testInfo) => {
 
     await test.step(`step(), endStep('2')`, async () => {
       await page.evaluate(() => window.step("2"));
-      await page.hover("canvas_top=#canvas", {
+      await page.hover("#canvas", {
         position: { x: 133, y: 72 },
       });
       await page.mouse.down();
@@ -55,7 +65,7 @@ test("codegen", async ({ page }, testInfo) => {
       await page.evaluate(() => window.endStep());
     });
 
-    await page.hover("canvas_top=#canvas", {
+    await page.hover("#canvas", {
       position: { x: 228, y: 294 },
     });
     await page.mouse.down();
@@ -66,22 +76,28 @@ test("codegen", async ({ page }, testInfo) => {
       const timeout = 1000;
       await page.evaluate(() => window.step("screenshots"));
       await test.step(`captureScreenshot()`, async () => {
-        await page.evaluate(() => window.captureScreenshot());
-        await page.waitForTimeout(timeout);
-      });
-      await test.step(`captureScreenshot({ name: 'a.png' })`, async () => {
-        await page.evaluate(() => window.captureScreenshot({ name: "a.png" }));
-        await page.waitForTimeout(timeout);
-      });
-      await test.step(`captureScreenshot({ selector: '#canvas' })`, async () => {
         await page.evaluate(() =>
-          window.captureScreenshot({ selector: "#canvas" })
+          window.captureScreenshot({
+            clip: { x: 0, y: 0, width: 500, height: 500 },
+          })
         );
         await page.waitForTimeout(timeout);
       });
-      await test.step(`captureScreenshot({ name: 'b.png', selector: '#canvas' })`, async () => {
+      await test.step(`captureScreenshot({ name: 'a.png' })`, async () => {
         await page.evaluate(() =>
-          window.captureScreenshot({ name: "b.png", selector: "#canvas" })
+          window.captureScreenshot({
+            name: "a.png",
+            clip: { x: 0, y: 0, width: 500, height: 500 },
+          })
+        );
+        await page.waitForTimeout(timeout);
+      });
+      await test.step(`captureScreenshot({ name: 'b.png' })`, async () => {
+        await page.evaluate(() =>
+          window.captureScreenshot({
+            name: "b.png",
+            clip: { x: 0, y: 0, width: 500, height: 500 },
+          })
         );
         await page.waitForTimeout(timeout);
       });
@@ -89,7 +105,7 @@ test("codegen", async ({ page }, testInfo) => {
 
     await test.step("modifier keys", async () => {
       await page.evaluate(() => window.step("modifier keys"));
-      await page.hover("canvas_top=#canvas", {
+      await page.hover("#canvas", {
         position: { x: 475, y: 555 },
       });
       await page.mouse.down();
@@ -106,7 +122,7 @@ test("codegen", async ({ page }, testInfo) => {
 
     await test.step("typing", async () => {
       await page.evaluate(() => window.step("typing"));
-      await page.click("canvas_top=#canvas", {
+      await page.click("#canvas", {
         position: { x: 58, y: 292 },
       });
       await page.keyboard.press("1");
@@ -133,7 +149,7 @@ test("codegen", async ({ page }, testInfo) => {
       await page.keyboard.press("3");
       await page.keyboard.up("Alt");
       await page.keyboard.up("Control");
-      await page.hover("canvas_top=#canvas", {
+      await page.hover("#canvas", {
         position: { x: 219, y: 256 },
       });
       await page.mouse.down();

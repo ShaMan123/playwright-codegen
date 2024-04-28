@@ -136,7 +136,7 @@ declare global {
 
 export class Codegen extends EventEmitter {
   readonly testInfo: TestInfo;
-  private readonly file: string;
+  readonly file: string;
   protected events: ConsumedEventData[] = [];
   private recording = false;
   private down = false;
