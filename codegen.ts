@@ -166,7 +166,7 @@ export class Codegen extends EventEmitter {
   protected prepareFile(testInfo: TestInfo, fileName: string) {
     const file = path.resolve(testInfo.outputDir, fileName);
     ensureFileSync(file);
-    testInfo.attach("codegen.ts", {
+    testInfo.attach(fileName, {
       path: file,
     });
 
