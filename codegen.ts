@@ -1,5 +1,6 @@
 import {
   ElementHandle,
+  Frame,
   Page,
   PageScreenshotOptions,
   TestInfo,
@@ -167,7 +168,10 @@ export class Codegen extends EventEmitter {
     return file;
   }
 
-  toSelector(handle: ElementHandle | null) {
+  /**
+   * https://github.com/microsoft/playwright/blob/1f63cbff08a11f6fad671824adfd4a0f283da29a/packages/playwright-core/src/server/injected/selectorGenerator.ts#L73
+   */
+  toSelector(handle: ElementHandle<Node>) {
     return "selector";
   }
 
@@ -241,7 +245,7 @@ export class Codegen extends EventEmitter {
         delete options?.name;
         this.emit("screenshot", {
           type: "screenshot",
-          handle: this.toSelector(handle),
+          handle: await this.toSelector(handle),
           screenshot: await (handle || page).screenshot(options),
           name,
           options,
@@ -332,6 +336,7 @@ export class Codegen extends EventEmitter {
 
   consume(ev: EventMap[keyof EventMap]) {
     const last = this.events[this.events.length - 1]?.type;
+    const beforeLast = this.events[this.events.length - 2]?.type;
 
     if (ev.type === "mousedown") {
       this.down = true;
@@ -356,6 +361,14 @@ export class Codegen extends EventEmitter {
     } else if (ev.type === "keyup" && last === "keydown") {
       this.events.pop();
       this.events.push({ ...ev, type: "keypress" });
+    } else if (
+      ev.type === "dblclick" &&
+      last === "click" &&
+      beforeLast === "click"
+    ) {
+      this.events.pop();
+      this.events.pop();
+      this.events.push(ev);
     } else {
       this.events.push(ev);
     }
@@ -384,11 +397,12 @@ export class Codegen extends EventEmitter {
         }
 
         case "mousedown": {
-          const { x, y, handle } = ev as MouseEventData;
+          const { x, y } = ev;
           return [
-            `await page.hover(${handle}, ${JSON.stringify({
-              position: { x, y },
-            })});`,
+            // `await page.hover(${ev.handle}, ${JSON.stringify({
+            //   position: { x, y },
+            // })});`,
+            `await page.mouse.move(${x}, ${y});`,
             `await page.mouse.down();`,
           ];
         }
@@ -403,12 +417,8 @@ export class Codegen extends EventEmitter {
         }
 
         case "click": {
-          const { x, y, handle } = ev;
-          return [
-            `await page.click(${handle}, ${JSON.stringify({
-              position: { x, y },
-            })});`,
-          ];
+          const { x, y } = ev;
+          return [`await page.mouse.click(${x}, ${y});`];
         }
 
         case "dblclick": {
