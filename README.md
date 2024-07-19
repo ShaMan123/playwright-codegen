@@ -1,3 +1,7 @@
+# Archived
+
+See https://github.com/ShaMan123/playwright/pull/1
+
 # Playwright Codegen
 
 A simple codegen plugin for playwright.
