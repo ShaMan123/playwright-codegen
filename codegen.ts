@@ -67,7 +67,7 @@ type ScreenshotEventData = {
   type: "screenshot";
   handle: string;
   screenshot: Buffer;
-  name?: string;
+  name: string;
   options?: PageScreenshotOptions;
 };
 
@@ -116,12 +116,9 @@ const getCodegenKey = ({
     .join("+");
 };
 
-interface PrivateCodegenMethods {
-  emitCodegenEvent: (e: MouseEventData | KeyboardEventData) => Promise<void>;
-  resolveSelector: (eventTarget: EventTarget) => Promise<string>;
-}
+type BBox = { x: number; y: number; width: number; height: number };
 
-interface CodegenMethods {
+interface CodegenBrowserAPI {
   startRecording: () => Promise<void>;
   stopRecording: () => Promise<void>;
   step: (name?: string) => Promise<void>;
@@ -133,9 +130,25 @@ interface CodegenMethods {
 }
 
 declare global {
-  interface Window extends PrivateCodegenMethods, CodegenMethods {}
+  interface Window extends CodegenBrowserAPI {
+    codegen: CodegenBrowserAPI & { help: VoidFunction };
+
+    emitCodegenEvent: (e: MouseEventData | KeyboardEventData) => Promise<void>;
+    resolveSelector: (eventTarget: EventTarget) => Promise<string>;
+    isCapturingScreenshotArea: () => boolean;
+    captureScreenshotArea: (bbox: BBox) => void;
+  }
 }
 
+/**
+ * @example
+ *
+ * test("My codegen test", async ({ page }, testInfo) => {
+ *   ...
+ *   // launch a TS file that is updated by codegen as well as playwright's native codegen
+ *   await Codegen.start(page, testInfo);
+ * });
+ */
 export class Codegen extends EventEmitter {
   readonly testInfo: TestInfo;
   readonly file: string;
@@ -144,6 +157,7 @@ export class Codegen extends EventEmitter {
   private down = false;
   private steps: string[] = [];
   private counter = 0;
+  private captureScreenshotArea?: (bbox: BBox) => void;
 
   /**
    * adds {@link CodegenMethods} to the window and starts recording
@@ -208,10 +222,16 @@ export class Codegen extends EventEmitter {
     this.installWindowEventHandlers(page);
     page.on("load", () => this.installWindowEventHandlers(page));
 
+    /**
+     * {@link CodegenBrowserAPI.startRecording}
+     */
     await page.exposeFunction("startRecording", () => {
       this.recording = true;
     });
 
+    /**
+     * {@link CodegenBrowserAPI.stopRecording}
+     */
     await page.exposeFunction("stopRecording", () => {
       this.recording = false;
     });
@@ -222,6 +242,9 @@ export class Codegen extends EventEmitter {
       }
     };
 
+    /**
+     * {@link CodegenBrowserAPI.step}
+     */
     await page.exposeFunction("step", async (name?: string) => {
       assertRecording();
       this.emit("step", {
@@ -235,6 +258,9 @@ export class Codegen extends EventEmitter {
       );
     });
 
+    /**
+     * {@link CodegenBrowserAPI.endStep}
+     */
     await page.exposeFunction("endStep", async () => {
       assertRecording();
       this.emit("step", { type: "step", which: "end" } as StepEventData);
@@ -244,19 +270,96 @@ export class Codegen extends EventEmitter {
       );
     });
 
+    await page.exposeFunction(
+      "isCapturingScreenshotArea",
+      () => !!this.captureScreenshotArea
+    );
+    await page.exposeFunction(
+      "captureScreenshotArea",
+      (bbox: { x: number; y: number; width: number; height: number }) =>
+        this.captureScreenshotArea?.(bbox)
+    );
+
+    /**
+     * {@link CodegenBrowserAPI.captureScreenshot}
+     */
     await page.exposeBinding(
       "captureScreenshot",
-      async ({ page }, options?: PageScreenshotOptions & { name?: string }) => {
+      async (
+        { page },
+        name = `${this.testInfo.title}-${++this.counter}.png`,
+        captureScreenshotArea?: boolean,
+        options: PageScreenshotOptions = {}
+      ) => {
         assertRecording();
+        if (captureScreenshotArea) {
+          // Track area selection
+          await page.evaluateHandle(() => {
+            const el = window.canvas.getSelectionElement();
+            // Block canvas interactions
+            el.style.pointerEvents = "none";
+
+            let downX = 0;
+            let downY = 0;
+            window.addEventListener(
+              "mousedown",
+              (e: MouseEvent) => {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                e.stopPropagation();
+                const { offsetX: x, offsetY: y } = e;
+                downX = x;
+                downY = y;
+              },
+              { once: true }
+            );
+            window.addEventListener(
+              "mouseup",
+              (e: MouseEvent) => {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                e.stopPropagation();
+                const { offsetX: x, offsetY: y } = e;
+                const left = Math.min(downX, x);
+                const top = Math.min(downY, y);
+                const right = Math.max(downX, x);
+                const bottom = Math.max(downY, y);
+                window.captureScreenshotArea({
+                  x: left,
+                  y: top,
+                  width: right - left,
+                  height: bottom - top,
+                });
+
+                // Restore canvas interactions
+                delete el.style.pointerEvents;
+
+                console.log("Successfully captured screenshot area");
+              },
+              { once: true }
+            );
+
+            console.log("Waiting for mouse down and up sequence");
+          });
+          options.clip = await new Promise<{
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+          }>(async (resolve) => {
+            this.captureScreenshotArea = resolve;
+          });
+          delete this.captureScreenshotArea;
+        }
         const handle = (
           await page.evaluateHandle(() => document.activeElement)
-        ).asElement();
-        const name = options?.name;
-        delete options?.name;
+        ).asElement()!;
         this.emit("screenshot", {
           type: "screenshot",
           handle: await this.toSelector(handle),
-          screenshot: await (handle || page).screenshot(options),
+          screenshot: await (
+            !options.clip && handle ? handle : page
+          ).screenshot(options),
           name,
           options,
         } as ScreenshotEventData);
@@ -264,9 +367,51 @@ export class Codegen extends EventEmitter {
       }
     );
 
+    /**
+     * {@link CodegenBrowserAPI.comment}
+     */
     await page.exposeFunction("comment", async (value: string) => {
       assertRecording();
       this.emit("comment", { type: "comment", value } as CommentEventData);
+    });
+
+    /**
+     * {@link CodegenBrowserAPI.comment}
+     */
+    await page.evaluateHandle(() => {
+      window.codegen = {
+        startRecording: window.startRecording,
+        stopRecording: window.stopRecording,
+        step: window.step,
+        endStep: window.endStep,
+        captureScreenshot: window.captureScreenshot,
+        comment: window.comment,
+        help: () => {
+          console.log(
+            [
+              "Canvas Codegen Help",
+              "Consider detaching devtools to avoid affecting the test",
+              "",
+              "Commands:",
+              ...[
+                "startRecording()",
+                "stopRecording()",
+                "",
+                "step('stepName')",
+                "endStep()",
+                "",
+                "captureScreenshot('name.png')",
+                "captureScreenshot('name.png', /** capture screenshot area */ true)",
+                "captureScreenshot(/** auto generate name */ undefined, true)",
+                "captureScreenshot('name.png', false, options)",
+                "",
+                "comment('Add a comment to the test file at cursor position')",
+              ].map((v) => `  ${v}`),
+            ].join("\n")
+          );
+        },
+      };
+      window.codegen.help();
     });
   }
 
@@ -274,6 +419,7 @@ export class Codegen extends EventEmitter {
     const disposer = await page.evaluateHandle(
       ([mouseEvents, keyboardEvents, modifiers]) => {
         const consumeMouseEvent = async (e: MouseEvent | WheelEvent) =>
+          !window.isCapturingScreenshotArea() &&
           window.emitCodegenEvent({
             type: e.type,
             x: e.x,
@@ -286,6 +432,7 @@ export class Codegen extends EventEmitter {
             ),
             handle: await window.resolveSelector(e.target),
           });
+
         const consumeKeyboardEvent = async (e: KeyboardEvent) =>
           window.emitCodegenEvent({
             type: e.type,
@@ -325,20 +472,14 @@ export class Codegen extends EventEmitter {
     const write = debounce(() => this.write(), 250);
     const exec = (ev: EventMap[keyof EventMap]) => this.consume(ev) && write();
     EVENTS_TO_CONSUME.forEach((eventType) => this.on(eventType, exec));
-    this.on(
-      "screenshot",
-      ({
-        name = `${this.testInfo.title}-${++this.counter}.png`,
-        screenshot,
-      }) => {
-        this.testInfo.attach(name, {
-          body: screenshot,
-        });
-        const snapshotPath = this.testInfo.snapshotPath(name);
-        ensureFileSync(snapshotPath);
-        writeFileSync(snapshotPath, screenshot);
-      }
-    );
+    this.on("screenshot", ({ name, screenshot }) => {
+      this.testInfo.attach(name, {
+        body: screenshot,
+      });
+      const snapshotPath = this.testInfo.snapshotPath(name);
+      ensureFileSync(snapshotPath);
+      writeFileSync(snapshotPath, screenshot);
+    });
   }
 
   on<K extends keyof EventMap>(
@@ -476,9 +617,11 @@ export class Codegen extends EventEmitter {
         case "screenshot": {
           const { name, options, handle } = ev;
           return [
-            `expect(await page.locator(${handle}).screenshot(${
+            `expect(${
+              options?.clip ? "page" : `await page.locator(${handle})`
+            }).toHaveScreenshot('${name}', ${
               options ? JSON.stringify(options) : ""
-            })).toMatchSnapshot(${name ? JSON.stringify({ name }) : ""});`,
+            });`,
           ];
         }
 

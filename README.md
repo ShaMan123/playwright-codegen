@@ -1,6 +1,6 @@
 # Archived
 
-See https://github.com/ShaMan123/playwright/pull/1
+See my [playwright fork](https://github.com/ShaMan123/playwright)
 
 # Playwright Codegen
 
@@ -32,7 +32,7 @@ import { Codegen } from "playwright-codegen";
 
 test("My codegen test", async ({ page }, testInfo) => {
   ...
-  await Codegen.start(page, testInfo); // launches a TS file that is updated by codegen
+  await Codegen.start(page, testInfo); // launches a TS file that is updated by codegen as well as playwright's native codegen
 });
 ```
 
